@@ -3,7 +3,9 @@
   import { link, params } from 'svelte-spa-router'
   import EmptyBox from '../components/common/EmptyBox.svelte'
   import StageRail from '../components/common/StageRail.svelte'
+  import RepairLedger from '../components/repair/RepairLedger.svelte'
   import { blockStore } from '../stores/blockStore'
+  import { repairStore } from '../stores/repairStore'
   import { db } from '../utils/db'
   import type { ProcessNode, ProcessStage } from '../types/node'
 
@@ -16,6 +18,10 @@
   let durationMin = $state(60)
   let note = $state('')
   let feedback = $state('')
+
+  const blockRepairs = $derived($repairStore.filter((item) => item.blockId === blockId))
+  const releasedRepairs = $derived(blockRepairs.filter((item) => item.status === '已放行'))
+  const openRepairCount = $derived(blockRepairs.filter((item) => item.status !== '已放行').length)
 
   function latestNode(): ProcessNode | null {
     const sorted = [...nodes].sort((a, b) => a.seq - b.seq)
@@ -30,7 +36,7 @@
   const nextStage = $derived(stages.find((stage) => !nodes.some((node) => node.stage === stage)) ?? null)
 
   onMount(() => {
-    void Promise.all([blockStore.load(), loadNodes()])
+    void Promise.all([blockStore.load(), repairStore.load(), loadNodes()])
   })
 
   $effect(() => {
@@ -138,6 +144,23 @@
       <span class="tag state-{block.state}">{block.state}</span>
     </div>
     <StageRail activeIndex={activeIndex} completedCount={nodes.length} onselect={returnToStage} />
+  </section>
+
+  <section class="panel" data-testid="detail-repairs">
+    <div class="panel-heading">
+      <div>
+        <span class="section-kicker">崩口修补复检</span>
+        <h2>崩口档案与放行记录</h2>
+      </div>
+      <span class="tag" class:state-tag={openRepairCount === 0}>
+        {openRepairCount > 0 ? `仍有 ${openRepairCount} 处待修/待复检` : `已放行 ${releasedRepairs.length} 处`}
+      </span>
+    </div>
+    {#if blockRepairs.length === 0}
+      <p class="gentle-copy">本块版片尚未登记崩口；如在编排台登记，放行记录会顺着版片回看到这里。</p>
+    {:else}
+      <RepairLedger {block} readonly={true} />
+    {/if}
   </section>
 
   <div class="timeline-grid">

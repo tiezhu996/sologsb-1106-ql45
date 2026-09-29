@@ -4,6 +4,7 @@ import type { Block } from '../types/block'
 import type { Carver } from '../types/carver'
 import type { PrintBatch } from '../types/batch'
 import type { ProcessNode } from '../types/node'
+import type { ChipRepair, RepairEvent, RepairEventType } from '../types/repair'
 
 type StoredRecord = Record<string, unknown> & { schemaRev?: number }
 
@@ -13,6 +14,7 @@ class WoodprintDatabase extends Dexie {
   carvers!: Table<Carver, string>
   batches!: Table<PrintBatch, string>
   nodes!: Table<ProcessNode, string>
+  repairs!: Table<ChipRepair, string>
 
   constructor() {
     super('gbwoodprint-db')
@@ -39,6 +41,34 @@ class WoodprintDatabase extends Dexie {
           await transaction.table(tableName).toCollection().modify((record: StoredRecord) => {
             record.schemaRev = 2
           })
+        }
+      })
+
+    this.version(3)
+      .stores({
+        drafts: 'id, genre, status, title, schemaRev',
+        blocks: 'id, draftId, colorNo, carvedBy, state, schemaRev',
+        carvers: 'id, specialty, skillLevel, name, schemaRev',
+        batches: 'id, draftId, batchNo, printedAt, schemaRev',
+        nodes: 'id, batchId, blockId, stage, seq, operator, schemaRev',
+        repairs: 'id, blockId, draftId, status, repairedAt, reviewedAt, schemaRev',
+      })
+      .upgrade(async (transaction) => {
+        const tableNames = ['drafts', 'blocks', 'carvers', 'batches', 'nodes', 'repairs'] as const
+        for (const tableName of tableNames) {
+          await transaction.table(tableName).toCollection().modify((record: StoredRecord) => {
+            record.schemaRev = 3
+          })
+        }
+
+        // 老库升级：种子版片仍在的，按现存版片回填示例崩口档案，避免出现孤立记录。
+        const blockIds = new Set<string>(await transaction.table('blocks').toCollection().primaryKeys())
+        const draftIds = new Set<string>(await transaction.table('drafts').toCollection().primaryKeys())
+        const seedRepairs = withSchemaRevision(
+          repairs.filter((item) => blockIds.has(item.blockId) && draftIds.has(item.draftId)),
+        )
+        if (seedRepairs.length > 0) {
+          await transaction.table('repairs').bulkPut(seedRepairs)
         }
       })
   }
@@ -193,8 +223,133 @@ const nodes: ProcessNode[] = [
   { id: 'node-ll-02', blockId: 'block-ll-01', stage: '修版', seq: 2, operator: '秦木生', startedAt: '2025-12-11T14:00', durationMin: 110, note: '鱼鳞线加修，边缘改圆顺。' },
 ]
 
+function repairEvent(type: RepairEventType, at: string, actor: string, note: string): RepairEvent {
+  return { type, at, actor, note }
+}
+
+const repairs: ChipRepair[] = [
+  {
+    id: 'repair-ms-01',
+    blockId: 'block-ms-01',
+    draftId: 'draft-menshen-qin',
+    seq: 1,
+    location: '敬德胡须末梢',
+    severity: '一般',
+    status: '已放行',
+    foundAt: '2026-02-21',
+    repairBy: '秦木生',
+    repairedAt: '2026-02-22',
+    repairNote: '顺线嵌补木屑，收口后试刀两遍。',
+    reviewBy: '齐师傅',
+    reviewedAt: '2026-02-23',
+    reviewNote: '刀口不再崩线，墨线饱满，可放行刻成。',
+    events: [
+      repairEvent('登记', '2026-02-21T10:10', '周桂枝', '试印发现胡须末端线口崩开一处。'),
+      repairEvent('送检', '2026-02-22T16:00', '秦木生', '嵌补完成，交复检。'),
+      repairEvent('复检通过', '2026-02-23T09:20', '齐师傅', '刀口不再崩线，放行。'),
+    ],
+  },
+  {
+    id: 'repair-ms-02-a',
+    blockId: 'block-ms-02',
+    draftId: 'draft-menshen-qin',
+    seq: 1,
+    location: '肩甲外侧边线',
+    severity: '轻微',
+    status: '待复检',
+    foundAt: '2026-02-21',
+    repairBy: '周桂枝',
+    repairedAt: '2026-02-24',
+    repairNote: '浅崩口顺线嵌补，已压平。',
+    reviewBy: '',
+    reviewedAt: '',
+    reviewNote: '',
+    events: [
+      repairEvent('登记', '2026-02-21T11:00', '周桂枝', '走版复校时发现甲胄边线浅崩。'),
+      repairEvent('送检', '2026-02-24T15:30', '周桂枝', '已嵌补，等师傅验刀口。'),
+    ],
+  },
+  {
+    id: 'repair-ms-02-b',
+    blockId: 'block-ms-02',
+    draftId: 'draft-menshen-qin',
+    seq: 2,
+    location: '靠旗根部留白',
+    severity: '一般',
+    status: '待修',
+    foundAt: '2026-02-25',
+    repairBy: '',
+    repairedAt: '',
+    repairNote: '',
+    reviewBy: '',
+    reviewedAt: '',
+    reviewNote: '',
+    events: [repairEvent('登记', '2026-02-25T08:40', '陈小满', '旗根处木纹起丝，尚未补。')],
+  },
+  {
+    id: 'repair-zw-01',
+    blockId: 'block-zw-02',
+    draftId: 'draft-zaowang-siming',
+    seq: 1,
+    location: '供桌纹样转角',
+    severity: '轻微',
+    status: '待复检',
+    foundAt: '2026-02-23',
+    repairBy: '周桂枝',
+    repairedAt: '2026-02-25',
+    repairNote: '跳刀处顺线修平，刀口已顺。',
+    reviewBy: '',
+    reviewedAt: '',
+    reviewNote: '',
+    events: [
+      repairEvent('登记', '2026-02-23T14:10', '陈小满', '供桌转角跳刀留痕。'),
+      repairEvent('送检', '2026-02-25T11:20', '周桂枝', '修平待复检。'),
+    ],
+  },
+  {
+    id: 'repair-ll-01',
+    blockId: 'block-ll-01',
+    draftId: 'draft-liannian-youyu',
+    seq: 1,
+    location: '鱼鳞线中段',
+    severity: '一般',
+    status: '已放行',
+    foundAt: '2025-12-10',
+    repairBy: '秦木生',
+    repairedAt: '2025-12-11',
+    repairNote: '鱼鳞线加修，边缘改圆顺。',
+    reviewBy: '齐师傅',
+    reviewedAt: '2025-12-12',
+    reviewNote: '首轮刀口偏紧退回，圆顺后复验无崩线，放行。',
+    events: [
+      repairEvent('登记', '2025-12-10T15:00', '秦木生', '鱼鳞线边缘发毛。'),
+      repairEvent('送检', '2025-12-11T16:30', '秦木生', '加修一轮送检。'),
+      repairEvent('退回重修', '2025-12-11T17:10', '齐师傅', '刀口偏紧，顺线再放圆。'),
+      repairEvent('送检', '2025-12-12T10:00', '秦木生', '边缘改圆顺，再次送检。'),
+      repairEvent('复检通过', '2025-12-12T11:00', '齐师傅', '刀口不再崩线，放行。'),
+    ],
+  },
+  {
+    id: 'repair-ll-01-b',
+    blockId: 'block-ll-01',
+    draftId: 'draft-liannian-youyu',
+    seq: 2,
+    location: '鱼尾外缘',
+    severity: '轻微',
+    status: '待修',
+    foundAt: '2026-02-26',
+    repairBy: '',
+    repairedAt: '',
+    repairNote: '',
+    reviewBy: '',
+    reviewedAt: '',
+    reviewNote: '',
+    events: [repairEvent('登记', '2026-02-26T09:15', '陈小满', '鱼尾外缘有针孔大小崩点，待嵌补。')],
+  },
+]
+
 function withSchemaRevision<T extends object>(records: T[]): Array<T & { schemaRev: number }> {
-  return records.map((record) => ({ ...record, schemaRev: 2 }))
+  return records.map((record) => ({ ...record, schemaRev: 3 }))
 }
 
 export const db = new WoodprintDatabase()
@@ -206,6 +361,7 @@ db.on('populate', () => {
     db.carvers.bulkAdd(withSchemaRevision(carvers)),
     db.batches.bulkAdd(withSchemaRevision(batches)),
     db.nodes.bulkAdd(withSchemaRevision(nodes)),
+    db.repairs.bulkAdd(withSchemaRevision(repairs)),
   ])
 })
 
@@ -214,13 +370,18 @@ export async function initializeDatabase(): Promise<void> {
   const draftCount = await db.drafts.count()
   if (draftCount > 0) return
 
-  await db.transaction('rw', db.drafts, db.blocks, db.carvers, db.batches, db.nodes, async () => {
-    await db.drafts.bulkPut(withSchemaRevision(drafts))
-    await db.blocks.bulkPut(withSchemaRevision(blocks))
-    await db.carvers.bulkPut(withSchemaRevision(carvers))
-    await db.batches.bulkPut(withSchemaRevision(batches))
-    await db.nodes.bulkPut(withSchemaRevision(nodes))
-  })
+  await db.transaction(
+    'rw',
+    [db.drafts, db.blocks, db.carvers, db.batches, db.nodes, db.repairs],
+    async () => {
+      await db.drafts.bulkPut(withSchemaRevision(drafts))
+      await db.blocks.bulkPut(withSchemaRevision(blocks))
+      await db.carvers.bulkPut(withSchemaRevision(carvers))
+      await db.batches.bulkPut(withSchemaRevision(batches))
+      await db.nodes.bulkPut(withSchemaRevision(nodes))
+      await db.repairs.bulkPut(withSchemaRevision(repairs))
+    },
+  )
 }
 
 export type { WoodprintDatabase }

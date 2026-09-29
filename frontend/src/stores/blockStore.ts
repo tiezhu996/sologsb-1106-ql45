@@ -1,6 +1,7 @@
 import { derived, writable } from 'svelte/store'
 import type { Block } from '../types/block'
 import { db } from '../utils/db'
+import { repairStore } from './repairStore'
 
 const blockList = writable<Block[]>([])
 
@@ -50,8 +51,11 @@ async function reorder(ordered: Array<Pick<Block, 'id' | 'colorNo'>>): Promise<v
 }
 
 async function removeByDraft(draftId: string): Promise<void> {
-  await db.blocks.where('draftId').equals(draftId).delete()
-  await load()
+  await db.transaction('rw', db.blocks, db.repairs, async () => {
+    await db.blocks.where('draftId').equals(draftId).delete()
+    await db.repairs.where('draftId').equals(draftId).delete()
+  })
+  await Promise.all([load(), repairStore.load()])
 }
 
 export const blockStore = {

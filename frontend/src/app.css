@@ -1185,3 +1185,48 @@ textarea:focus {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* 崩口修补复检流程 */
+.summary-strip.five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.stage-row td {
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
+}
+
+.repair-row > td {
+  padding: 0.7rem 0.9rem 0.95rem;
+  background: color-mix(in srgb, var(--paper) 78%, #fff);
+  border-bottom: 2px solid var(--line-strong);
+}
+
+.block-warn {
+  display: block;
+  margin-top: 0.3rem;
+  color: #8a3c14;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.state-tag {
+  color: #1f5c43;
+  background: #cde6d8;
+}
+
+.mini-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 980px) {
+  .summary-strip.five {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .summary-strip.five {
+    grid-template-columns: 1fr;
+  }
+}
