@@ -6,9 +6,11 @@
   import EmptyBox from '../components/common/EmptyBox.svelte'
   import SeqInput from '../components/common/SeqInput.svelte'
   import StageRail from '../components/common/StageRail.svelte'
+  import RepairLedger from '../components/repair/RepairLedger.svelte'
   import { blockStore } from '../stores/blockStore'
   import { carverStore } from '../stores/carverStore'
   import { draftStore } from '../stores/draftStore'
+  import { repairStore } from '../stores/repairStore'
   import { useBlockOrder } from '../hooks/useBlockOrder'
   import { useCarverLoad } from '../hooks/useCarverLoad'
   import { validateColorSequence } from '../utils/seq'
@@ -26,15 +28,18 @@
   const { activeCount: selectedActiveCount, averageDuration: selectedAverageDuration, refresh: refreshCarverLoad } = useCarverLoad('')
 
   let sequenceDraft = $state<Record<string, number>>({})
-  let defectDraft = $state<Record<string, string>>({})
   let selectedCarverId = $state('')
   let notice = $state('')
   let lastSync = $state('刚刚')
 
   const draft = $derived($draftStore.find((item) => item.id === draftId) ?? null)
+  const repairStatsByDraft = repairStore.statsByDraft
+  const repairStats = $derived(
+    $repairStatsByDraft[draftId] ?? { waitingRepair: 0, waitingCheck: 0, released: 0 },
+  )
 
   onMount(() => {
-    void Promise.all([draftStore.load(), blockStore.load(), carverStore.load()])
+    void Promise.all([draftStore.load(), blockStore.load(), carverStore.load(), repairStore.load()])
   })
 
   $effect(() => {
@@ -44,7 +49,6 @@
   $effect(() => {
     for (const block of $orderedBlocks) {
       if (sequenceDraft[block.id] === undefined) sequenceDraft[block.id] = block.colorNo
-      if (defectDraft[block.id] === undefined) defectDraft[block.id] = block.defectNote
     }
   })
 
@@ -65,6 +69,10 @@
     return $orderedBlocks.filter((block) => block.id !== exceptId).map((block) => block.colorNo)
   }
 
+  function openChips(block: Block): number {
+    return $repairStore.filter((item) => item.blockId === block.id && item.status !== '已放行').length
+  }
+
   async function assignCarver(block: Block, carverName: string): Promise<void> {
     const carver = $carverStore.find((item) => item.name === carverName)
     if (!carver) return
@@ -74,6 +82,11 @@
   }
 
   async function markCarved(block: Block): Promise<void> {
+    const open = openChips(block)
+    if (open > 0) {
+      notice = `${block.blockName}还有 ${open} 处崩口未放行，须经另一名师傅复检通过、刀口不再崩线后方可刻成。`
+      return
+    }
     await blockStore.update(block.id, { state: '已刻成' })
     await carverStore.releaseBlock(block.id)
     const currentBlocks = get(blockStore).filter((item) => item.draftId === draftId)
@@ -126,11 +139,6 @@
     lastSync = `${block.blockName}已${direction < 0 ? '前移' : '后移'}`
   }
 
-  async function saveDefect(block: Block): Promise<void> {
-    await blockStore.update(block.id, { defectNote: defectDraft[block.id] ?? '' })
-    lastSync = `${block.blockName}崩口记录已更新`
-  }
-
   async function returnToStage(_index: number, stage: ProcessStage): Promise<void> {
     const block = $orderedBlocks[0]
     if (!block) return
@@ -167,11 +175,12 @@
     <a class="button ghost" use:link href="/drafts">返回画稿总览</a>
   </div>
 
-  <section class="summary-strip four">
+  <section class="summary-strip five">
     <div><span>版片总数</span><strong>{$orderedBlocks.length}</strong></div>
     <div><span>刻成率</span><strong>{$blockCarvedRate}%</strong></div>
     <div><span>在刻版片</span><strong>{$orderedBlocks.filter((block) => block.state === '在刻').length}</strong></div>
-    <div><span>需修版片</span><strong>{$orderedBlocks.filter((block) => block.defectNote).length}</strong></div>
+    <div><span>待修崩口</span><strong data-testid="stat-waitingRepair">{repairStats.waitingRepair}</strong><small>处</small></div>
+    <div><span>待复检崩口</span><strong data-testid="stat-waitingCheck">{repairStats.waitingCheck}</strong><small>处</small></div>
   </section>
 
   <div class="workbench-grid">
@@ -219,6 +228,7 @@
                   </td>
                   <td>
                     <ColorSwatch colorNo={block.colorNo} blockName={block.blockName} />
+                    <a class="mini-button" use:link href={`/blocks/${block.id}/nodes`} data-testid={`link-nodes-${block.id}`}>工序与修补档案</a>
                   </td>
                   <td>
                     <strong>{block.woodType}</strong>
@@ -239,17 +249,18 @@
                   <td>
                     <span class="tag state-{block.state}">{block.state}</span>
                     {#if block.state !== '已刻成' && block.state !== '已修版'}
-                      <button class="mini-button strong" type="button" onclick={() => markCarved(block)}>标刻成</button>
+                      {#if openChips(block) > 0}
+                        <button class="mini-button" type="button" disabled title="崩口复检放行后才能刻成">待复检放行</button>
+                      {:else}
+                        <button class="mini-button strong" type="button" onclick={() => markCarved(block)}>标刻成</button>
+                      {/if}
                     {/if}
                   </td>
                   <td>
-                    <textarea
-                      data-testid={`field-defectNote-${block.id}`}
-                      rows="2"
-                      bind:value={defectDraft[block.id]}
-                      placeholder="崩口、补线或嵌木说明"
-                    ></textarea>
-                    <button class="mini-button" type="button" onclick={() => saveDefect(block)}>存记录</button>
+                    <details class="repair-details" open={openChips(block) > 0}>
+                      <summary>崩口与修补复检</summary>
+                      <RepairLedger {block} />
+                    </details>
                   </td>
                 </tr>
                 <tr class="stage-row">

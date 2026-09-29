@@ -3,7 +3,9 @@
   import { link, params } from 'svelte-spa-router'
   import EmptyBox from '../components/common/EmptyBox.svelte'
   import StageRail from '../components/common/StageRail.svelte'
+  import RepairLedger from '../components/repair/RepairLedger.svelte'
   import { blockStore } from '../stores/blockStore'
+  import { repairStore } from '../stores/repairStore'
   import { db } from '../utils/db'
   import type { ProcessNode, ProcessStage } from '../types/node'
 
@@ -16,6 +18,8 @@
   let durationMin = $state(60)
   let note = $state('')
   let feedback = $state('')
+
+  const chipCount = $derived($repairStore.filter((item) => item.blockId === blockId).length)
 
   function latestNode(): ProcessNode | null {
     const sorted = [...nodes].sort((a, b) => a.seq - b.seq)
@@ -30,7 +34,7 @@
   const nextStage = $derived(stages.find((stage) => !nodes.some((node) => node.stage === stage)) ?? null)
 
   onMount(() => {
-    void Promise.all([blockStore.load(), loadNodes()])
+    void Promise.all([blockStore.load(), repairStore.load(), loadNodes()])
   })
 
   $effect(() => {
@@ -203,4 +207,19 @@
       {/if}
     </section>
   </div>
+
+  <section class="panel" data-testid="detail-repairs">
+    <div class="panel-heading">
+      <div>
+        <span class="section-kicker">版片回看</span>
+        <h2>崩口修补复检档案</h2>
+      </div>
+      <strong>{chipCount} 处</strong>
+    </div>
+    {#if chipCount === 0}
+      <p class="gentle-copy">这块版片暂无崩口修补记录。</p>
+    {:else}
+      <RepairLedger {block} readonly={true} />
+    {/if}
+  </section>
 {/if}
